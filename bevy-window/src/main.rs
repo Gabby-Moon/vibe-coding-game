@@ -5,6 +5,8 @@ const PLAYER_ACCELERATION: f32 = 900.0;
 const PLAYER_MAX_SPEED: f32 = 350.0;
 const PLAYER_FRICTION: f32 = 0.08;
 const PLAYER_SIZE: f32 = 25.0;
+const WALL_THICKNESS: f32 = 15.0;
+const PATH_WIDTH: f32 = PLAYER_SIZE * 4.4;
 
 #[derive(Component)]
 struct Player;
@@ -12,16 +14,21 @@ struct Player;
 #[derive(Component, Default)]
 struct Velocity(Vec2);
 
+#[derive(Component)]
+struct Wall;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Update, player_movement)
+        .add_systems(Update, (player_movement, resolve_wall_collisions.after(player_movement)))
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2dBundle::default());
+    let window = window_query.get_single().unwrap();
+    spawn_maze(&mut commands, window);
 
     commands
         .spawn(SpriteBundle {
@@ -35,6 +42,51 @@ fn setup(mut commands: Commands) {
         })
         .insert(Player)
         .insert(Velocity::default());
+}
+
+fn spawn_maze(commands: &mut Commands, window: &Window) {
+    let half_width = window.width() / 2.0;
+    let half_height = window.height() / 2.0;
+    let wall_color = Color::rgb(0.2, 0.2, 0.2);
+
+    let walls = vec![
+        // border walls
+        (Vec2::new(0.0, half_height - WALL_THICKNESS / 2.0), Vec2::new(window.width(), WALL_THICKNESS)),
+        (Vec2::new(0.0, -half_height + WALL_THICKNESS / 2.0), Vec2::new(window.width(), WALL_THICKNESS)),
+        (Vec2::new(-half_width + WALL_THICKNESS / 2.0, 0.0), Vec2::new(WALL_THICKNESS, window.height())),
+        (Vec2::new(half_width - WALL_THICKNESS / 2.0, 0.0), Vec2::new(WALL_THICKNESS, window.height())),
+
+        // interior grouped blocks
+        (Vec2::new(-PATH_WIDTH, PATH_WIDTH / 2.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 1.2)),
+        (Vec2::new(PATH_WIDTH, -PATH_WIDTH / 2.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 1.2)),
+        (Vec2::new(-PATH_WIDTH / 2.0, PATH_WIDTH), Vec2::new(PATH_WIDTH * 1.2, WALL_THICKNESS)),
+        (Vec2::new(PATH_WIDTH / 2.0, -PATH_WIDTH), Vec2::new(PATH_WIDTH * 1.2, WALL_THICKNESS)),
+
+        (Vec2::new(-PATH_WIDTH * 1.5, 0.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 0.8)),
+        (Vec2::new(PATH_WIDTH * 1.5, 0.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 0.8)),
+        (Vec2::new(0.0, -PATH_WIDTH * 1.5), Vec2::new(PATH_WIDTH * 0.8, WALL_THICKNESS)),
+        (Vec2::new(0.0, PATH_WIDTH * 1.5), Vec2::new(PATH_WIDTH * 0.8, WALL_THICKNESS)),
+
+        // extra obstacles around the edge
+        (Vec2::new(-half_width / 3.0, half_height / 3.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 0.7)),
+        (Vec2::new(half_width / 3.0, -half_height / 3.0), Vec2::new(WALL_THICKNESS, PATH_WIDTH * 0.7)),
+        (Vec2::new(half_width / 3.0, half_height / 3.0), Vec2::new(PATH_WIDTH * 0.7, WALL_THICKNESS)),
+        (Vec2::new(-half_width / 3.0, -half_height / 3.0), Vec2::new(PATH_WIDTH * 0.7, WALL_THICKNESS)),
+    ];
+
+    for (position, size) in walls {
+        commands
+            .spawn(SpriteBundle {
+                sprite: Sprite {
+                    color: wall_color,
+                    custom_size: Some(size),
+                    ..default()
+                },
+                transform: Transform::from_xyz(position.x, position.y, 0.0),
+                ..default()
+            })
+            .insert(Wall);
+    }
 }
 
 fn player_movement(
@@ -86,5 +138,44 @@ fn player_movement(
 
         transform.translation.x = transform.translation.x.clamp(-x_bound, x_bound);
         transform.translation.y = transform.translation.y.clamp(-y_bound, y_bound);
+    }
+}
+
+fn resolve_wall_collisions(
+    mut player_query: Query<(&mut Transform, &mut Velocity), With<Player>>,
+    wall_query: Query<(&Transform, &Sprite), (With<Wall>, Without<Player>)>,
+) {
+    if let Ok((mut player_transform, mut player_velocity)) = player_query.get_single_mut() {
+        let player_pos = player_transform.translation.truncate();
+        let player_half = Vec2::splat(PLAYER_SIZE / 2.0);
+
+        for (wall_transform, wall_sprite) in wall_query.iter() {
+            if let Some(wall_size) = wall_sprite.custom_size {
+                let wall_pos = wall_transform.translation.truncate();
+                let wall_half = wall_size / 2.0;
+
+                let delta = player_pos - wall_pos;
+                let overlap_x = player_half.x + wall_half.x - delta.x.abs();
+                let overlap_y = player_half.y + wall_half.y - delta.y.abs();
+
+                if overlap_x > 0.0 && overlap_y > 0.0 {
+                    if overlap_x < overlap_y {
+                        if delta.x > 0.0 {
+                            player_transform.translation.x += overlap_x;
+                        } else {
+                            player_transform.translation.x -= overlap_x;
+                        }
+                        player_velocity.0.x = 0.0;
+                    } else {
+                        if delta.y > 0.0 {
+                            player_transform.translation.y += overlap_y;
+                        } else {
+                            player_transform.translation.y -= overlap_y;
+                        }
+                        player_velocity.0.y = 0.0;
+                    }
+                }
+            }
+        }
     }
 }
