@@ -30,23 +30,32 @@ struct Collectible {
 struct ScoreText;
 
 #[derive(Component)]
+struct TimerText;
+
+#[derive(Component)]
 struct CountdownText;
 
 #[derive(Resource)]
 struct Score(u32);
 
 #[derive(Resource)]
-struct Countdown(f32);
+struct GameTimer {
+    countdown: f32,
+    remaining: f32,
+}
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(Score(0))
-        .insert_resource(Countdown(3.0))
+        .insert_resource(GameTimer {
+            countdown: 3.0,
+            remaining: 60.0,
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, (
-            update_countdown_text,
-            player_movement.after(update_countdown_text),
+            update_timers_text,
+            player_movement.after(update_timers_text),
             resolve_wall_collisions.after(player_movement),
             collect_pickups.after(player_movement),
             update_score_text.after(collect_pickups),
@@ -141,19 +150,51 @@ fn spawn_score_ui(commands: &mut Commands) {
         })
         .with_children(|parent| {
             parent
-                .spawn(TextBundle {
-                    text: Text::from_section(
-                        "Score: 0",
-                        TextStyle {
-                            font_size: 34.0,
-                            color: Color::WHITE,
-                            ..default()
-                        },
-                    )
-                    .with_alignment(TextAlignment::Center),
+                .spawn(NodeBundle {
+                    style: Style {
+                        width: Val::Percent(100.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        flex_direction: FlexDirection::Row,
+                        ..default()
+                    },
                     ..default()
                 })
-                .insert(ScoreText);
+                .with_children(|parent| {
+                    parent
+                        .spawn(TextBundle {
+                            text: Text::from_section(
+                                "Time: 60",
+                                TextStyle {
+                                    font_size: 30.0,
+                                    color: Color::WHITE,
+                                    ..default()
+                                },
+                            )
+                            .with_alignment(TextAlignment::Center),
+                            style: Style {
+                                margin: UiRect::right(Val::Px(20.0)),
+                                ..default()
+                            },
+                            ..default()
+                        })
+                        .insert(TimerText);
+
+                    parent
+                        .spawn(TextBundle {
+                            text: Text::from_section(
+                                "Score: 0",
+                                TextStyle {
+                                    font_size: 34.0,
+                                    color: Color::WHITE,
+                                    ..default()
+                                },
+                            )
+                            .with_alignment(TextAlignment::Center),
+                            ..default()
+                        })
+                        .insert(ScoreText);
+                });
         });
 }
 
@@ -170,7 +211,7 @@ fn spawn_countdown_ui(commands: &mut Commands) {
                 left: Val::Px(0.0),
                 ..default()
             },
-            background_color: BackgroundColor(Color::NONE),
+            background_color: BackgroundColor(Color::rgba(0.0, 0.0, 0.0, 0.75)),
             ..default()
         })
         .with_children(|parent| {
@@ -265,10 +306,10 @@ fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    countdown: Res<Countdown>,
+    timer: Res<GameTimer>,
     mut query: Query<(&mut Transform, &mut Velocity), With<Player>>,
 ) {
-    if countdown.0 > 0.0 {
+    if timer.countdown > 0.0 || timer.remaining <= 0.0 {
         return;
     }
 
@@ -389,34 +430,37 @@ fn update_score_text(score: Res<Score>, mut query: Query<&mut Text, With<ScoreTe
     }
 }
 
-fn update_countdown_text(
+fn update_timers_text(
     time: Res<Time>,
-    mut countdown: ResMut<Countdown>,
-    mut query: Query<&mut Text, With<CountdownText>>,
+    mut timer: ResMut<GameTimer>,
+    mut queries: ParamSet<(
+        Query<&mut Text, With<CountdownText>>,
+        Query<&mut Text, With<TimerText>>,
+    )>,
 ) {
-    if countdown.0 <= 0.0 {
-        if let Ok(mut text) = query.get_single_mut() {
-            text.sections[0].value = String::new();
+    if timer.countdown > 0.0 {
+        timer.countdown -= time.delta_seconds();
+        if timer.countdown < 0.0 {
+            timer.countdown = 0.0;
         }
-        return;
+    } else if timer.remaining > 0.0 {
+        timer.remaining -= time.delta_seconds();
+        if timer.remaining < 0.0 {
+            timer.remaining = 0.0;
+        }
     }
 
-    countdown.0 -= time.delta_seconds();
-    if countdown.0 < 0.0 {
-        countdown.0 = 0.0;
-    }
-
-    if let Ok(mut text) = query.get_single_mut() {
-        let value = if countdown.0 > 0.0 {
-            countdown.0.ceil() as i32
-        } else {
-            0
-        };
-
-        if value > 0 {
-            text.sections[0].value = value.to_string();
+    if let Ok(mut text) = queries.p0().get_single_mut() {
+        if timer.countdown > 0.0 {
+            text.sections[0].value = timer.countdown.ceil().to_string();
+        } else if timer.remaining > 0.0 && timer.remaining <= 10.0 {
+            text.sections[0].value = timer.remaining.ceil().to_string();
         } else {
             text.sections[0].value = String::new();
         }
+    }
+
+    if let Ok(mut text) = queries.p1().get_single_mut() {
+        text.sections[0].value = format!("Time: {}", timer.remaining.ceil() as u32);
     }
 }
