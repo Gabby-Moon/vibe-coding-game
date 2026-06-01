@@ -433,6 +433,7 @@ fn update_score_text(score: Res<Score>, mut query: Query<&mut Text, With<ScoreTe
 fn update_timers_text(
     time: Res<Time>,
     mut timer: ResMut<GameTimer>,
+    score: Res<Score>,
     mut queries: ParamSet<(
         Query<&mut Text, With<CountdownText>>,
         Query<&mut Text, With<TimerText>>,
@@ -455,6 +456,8 @@ fn update_timers_text(
             text.sections[0].value = timer.countdown.ceil().to_string();
         } else if timer.remaining > 0.0 && timer.remaining <= 10.0 {
             text.sections[0].value = timer.remaining.ceil().to_string();
+        } else if timer.remaining <= 0.0 {
+            text.sections[0].value = format!("Good Job! You got {} points!", score.0);
         } else {
             text.sections[0].value = String::new();
         }
