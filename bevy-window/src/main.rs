@@ -10,7 +10,7 @@ const WALL_THICKNESS: f32 = 15.0;
 const PATH_WIDTH: f32 = PLAYER_SIZE * 4.4;
 const PICKUP_SIZE: f32 = 10.0;
 const PICKUP_SPACING: f32 = 5.0;
-const PICKUP_COUNT: usize = 30;
+const PICKUP_COUNT: usize = 80;
 
 #[derive(Component)]
 struct Player;
