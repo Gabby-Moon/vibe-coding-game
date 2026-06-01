@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, Window};
+use rand::prelude::*;
 
 const PLAYER_ACCELERATION: f32 = 900.0;
 const PLAYER_MAX_SPEED: f32 = 350.0;
@@ -7,6 +8,9 @@ const PLAYER_FRICTION: f32 = 0.08;
 const PLAYER_SIZE: f32 = 25.0;
 const WALL_THICKNESS: f32 = 15.0;
 const PATH_WIDTH: f32 = PLAYER_SIZE * 4.4;
+const PICKUP_SIZE: f32 = 10.0;
+const PICKUP_SPACING: f32 = 5.0;
+const PICKUP_COUNT: usize = 30;
 
 #[derive(Component)]
 struct Player;
@@ -17,18 +21,28 @@ struct Velocity(Vec2);
 #[derive(Component)]
 struct Wall;
 
+#[derive(Component)]
+struct Collectible {
+    value: u32,
+}
+
+#[derive(Resource)]
+struct Score(u32);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(Score(0))
         .add_systems(Startup, setup)
-        .add_systems(Update, (player_movement, resolve_wall_collisions.after(player_movement)))
+        .add_systems(Update, (player_movement, resolve_wall_collisions.after(player_movement), collect_pickups.after(player_movement)))
         .run();
 }
 
 fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2dBundle::default());
     let window = window_query.get_single().unwrap();
-    spawn_maze(&mut commands, window);
+    let wall_rects = spawn_maze(&mut commands, window);
+    spawn_pickups(&mut commands, window, &wall_rects);
 
     commands
         .spawn(SpriteBundle {
@@ -44,7 +58,7 @@ fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow
         .insert(Velocity::default());
 }
 
-fn spawn_maze(commands: &mut Commands, window: &Window) {
+fn spawn_maze(commands: &mut Commands, window: &Window) -> Vec<(Vec2, Vec2)> {
     let half_width = window.width() / 2.0;
     let half_height = window.height() / 2.0;
     let wall_color = Color::rgb(0.2, 0.2, 0.2);
@@ -74,12 +88,12 @@ fn spawn_maze(commands: &mut Commands, window: &Window) {
         (Vec2::new(-half_width / 3.0, -half_height / 3.0), Vec2::new(PATH_WIDTH * 0.7, WALL_THICKNESS)),
     ];
 
-    for (position, size) in walls {
+    for (position, size) in &walls {
         commands
             .spawn(SpriteBundle {
                 sprite: Sprite {
                     color: wall_color,
-                    custom_size: Some(size),
+                    custom_size: Some(*size),
                     ..default()
                 },
                 transform: Transform::from_xyz(position.x, position.y, 0.0),
@@ -87,6 +101,78 @@ fn spawn_maze(commands: &mut Commands, window: &Window) {
             })
             .insert(Wall);
     }
+
+    walls
+}
+
+fn spawn_pickups(commands: &mut Commands, window: &Window, wall_rects: &[(Vec2, Vec2)]) {
+    let mut rng = thread_rng();
+    let half_width = window.width() / 2.0;
+    let half_height = window.height() / 2.0;
+    let placement_margin = WALL_THICKNESS / 2.0 + PICKUP_SIZE / 2.0 + PICKUP_SPACING;
+    let min_x = -half_width + placement_margin;
+    let max_x = half_width - placement_margin;
+    let min_y = -half_height + placement_margin;
+    let max_y = half_height - placement_margin;
+
+    let mut placed_positions = Vec::new();
+    let max_attempts = 1000;
+
+    for _ in 0..PICKUP_COUNT {
+        let mut attempts = 0;
+        while attempts < max_attempts {
+            attempts += 1;
+            let candidate = Vec2::new(rng.gen_range(min_x..max_x), rng.gen_range(min_y..max_y));
+            if is_valid_pickup_position(candidate, wall_rects, &placed_positions) {
+                let (color, value) = match rng.gen_range(0..6) {
+                    0 => (Color::RED, 50),
+                    1 => (Color::YELLOW, 100),
+                    2 => (Color::GREEN, 20),
+                    3 => (Color::BLUE, 5),
+                    4 => (Color::PURPLE, 5),
+                    _ => (Color::ORANGE, 5),
+                };
+
+                commands
+                    .spawn(SpriteBundle {
+                        sprite: Sprite {
+                            color,
+                            custom_size: Some(Vec2::splat(PICKUP_SIZE)),
+                            ..default()
+                        },
+                        transform: Transform::from_xyz(candidate.x, candidate.y, 0.0),
+                        ..default()
+                    })
+                    .insert(Collectible { value });
+
+                placed_positions.push(candidate);
+                break;
+            }
+        }
+    }
+}
+
+fn is_valid_pickup_position(candidate: Vec2, wall_rects: &[(Vec2, Vec2)], existing: &[Vec2]) -> bool {
+    let pickup_half = Vec2::splat(PICKUP_SIZE / 2.0 + PICKUP_SPACING);
+
+    for (wall_pos, wall_size) in wall_rects {
+        let wall_half = *wall_size / 2.0;
+        let delta = candidate - *wall_pos;
+        let overlap_x = pickup_half.x + wall_half.x - delta.x.abs();
+        let overlap_y = pickup_half.y + wall_half.y - delta.y.abs();
+        if overlap_x > 0.0 && overlap_y > 0.0 {
+            return false;
+        }
+    }
+
+    let min_center_distance = PICKUP_SIZE + PICKUP_SPACING;
+    for other in existing {
+        if candidate.distance_squared(*other) < min_center_distance * min_center_distance {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn player_movement(
@@ -175,6 +261,32 @@ fn resolve_wall_collisions(
                         player_velocity.0.y = 0.0;
                     }
                 }
+            }
+        }
+    }
+}
+
+fn collect_pickups(
+    mut commands: Commands,
+    mut score: ResMut<Score>,
+    player_query: Query<&Transform, With<Player>>,
+    pickup_query: Query<(Entity, &Transform, &Collectible)>,
+) {
+    if let Ok(player_transform) = player_query.get_single() {
+        let player_pos = player_transform.translation.truncate();
+        let player_half = Vec2::splat(PLAYER_SIZE / 2.0);
+        let pickup_half = Vec2::splat(PICKUP_SIZE / 2.0);
+
+        for (entity, pickup_transform, collectible) in pickup_query.iter() {
+            let pickup_pos = pickup_transform.translation.truncate();
+            let delta = player_pos - pickup_pos;
+            let overlap_x = player_half.x + pickup_half.x - delta.x.abs();
+            let overlap_y = player_half.y + pickup_half.y - delta.y.abs();
+
+            if overlap_x > 0.0 && overlap_y > 0.0 {
+                score.0 += collectible.value;
+                commands.entity(entity).despawn();
+                info!("Score: {}", score.0);
             }
         }
     }
