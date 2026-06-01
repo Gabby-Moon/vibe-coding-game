@@ -1,0 +1,36 @@
+# Rust/Cargo
+/target/
+
+# Visual Studio & MSVC
+.vs/
+*.vcxproj*
+*.suo
+*.user
+*.userosscache
+*.pdb
+*.ilk
+
+# Binaries and dynamic libs
+*.exe
+*.dll
+*.lib
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Incremental/temporary
+/incremental/
+
+# Optional: ignore build artifacts anywhere
+**/target/
