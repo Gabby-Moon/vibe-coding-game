@@ -261,16 +261,31 @@ fn spawn_pickups(commands: &mut Commands, window: &Window, wall_rects: &[(Vec2, 
                 };
 
                 commands
-                    .spawn(SpriteBundle {
-                        sprite: Sprite {
-                            color,
-                            custom_size: Some(Vec2::splat(PICKUP_SIZE)),
-                            ..default()
-                        },
+                    .spawn(SpatialBundle {
                         transform: Transform::from_xyz(candidate.x, candidate.y, 0.0),
                         ..default()
                     })
-                    .insert(Collectible { value });
+                    .insert(Collectible { value })
+                    .with_children(|parent| {
+                        parent.spawn(SpriteBundle {
+                            sprite: Sprite {
+                                color,
+                                custom_size: Some(Vec2::splat(PICKUP_SIZE)),
+                                ..default()
+                            },
+                            transform: Transform::from_xyz(0.0, 0.0, 0.0),
+                            ..default()
+                        });
+                        parent.spawn(SpriteBundle {
+                            sprite: Sprite {
+                                color: Color::rgb(0.15, 0.09, 0.02),
+                                custom_size: Some(Vec2::new(2.0, 6.0)),
+                                ..default()
+                            },
+                            transform: Transform::from_xyz(0.0, PICKUP_SIZE * 0.35, 0.0),
+                            ..default()
+                        });
+                    });
 
                 placed_positions.push(candidate);
                 break;
@@ -417,7 +432,7 @@ fn collect_pickups(
 
             if overlap_x > 0.0 && overlap_y > 0.0 {
                 score.0 += collectible.value;
-                commands.entity(entity).despawn();
+                commands.entity(entity).despawn_recursive();
                 info!("Score: {}", score.0);
             }
         }
