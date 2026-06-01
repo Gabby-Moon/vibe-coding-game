@@ -29,16 +29,24 @@ struct Collectible {
 #[derive(Component)]
 struct ScoreText;
 
+#[derive(Component)]
+struct CountdownText;
+
 #[derive(Resource)]
 struct Score(u32);
+
+#[derive(Resource)]
+struct Countdown(f32);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(Score(0))
+        .insert_resource(Countdown(3.0))
         .add_systems(Startup, setup)
         .add_systems(Update, (
-            player_movement,
+            update_countdown_text,
+            player_movement.after(update_countdown_text),
             resolve_wall_collisions.after(player_movement),
             collect_pickups.after(player_movement),
             update_score_text.after(collect_pickups),
@@ -52,6 +60,7 @@ fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow
     let wall_rects = spawn_maze(&mut commands, window);
     spawn_pickups(&mut commands, window, &wall_rects);
     spawn_score_ui(&mut commands);
+    spawn_countdown_ui(&mut commands);
 
     commands
         .spawn(SpriteBundle {
@@ -148,6 +157,40 @@ fn spawn_score_ui(commands: &mut Commands) {
         });
 }
 
+fn spawn_countdown_ui(commands: &mut Commands) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Auto,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                position_type: PositionType::Absolute,
+                top: Val::Percent(45.0),
+                left: Val::Px(0.0),
+                ..default()
+            },
+            background_color: BackgroundColor(Color::NONE),
+            ..default()
+        })
+        .with_children(|parent| {
+            parent
+                .spawn(TextBundle {
+                    text: Text::from_section(
+                        "3",
+                        TextStyle {
+                            font_size: 80.0,
+                            color: Color::WHITE,
+                            ..default()
+                        },
+                    )
+                    .with_alignment(TextAlignment::Center),
+                    ..default()
+                })
+                .insert(CountdownText);
+        });
+}
+
 fn spawn_pickups(commands: &mut Commands, window: &Window, wall_rects: &[(Vec2, Vec2)]) {
     let mut rng = thread_rng();
     let half_width = window.width() / 2.0;
@@ -222,8 +265,13 @@ fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
     window_query: Query<&Window, With<PrimaryWindow>>,
+    countdown: Res<Countdown>,
     mut query: Query<(&mut Transform, &mut Velocity), With<Player>>,
 ) {
+    if countdown.0 > 0.0 {
+        return;
+    }
+
     if let Ok((mut transform, mut velocity)) = query.get_single_mut() {
         let window = window_query.get_single().unwrap();
         let mut direction = Vec2::ZERO;
@@ -338,5 +386,37 @@ fn collect_pickups(
 fn update_score_text(score: Res<Score>, mut query: Query<&mut Text, With<ScoreText>>) {
     if let Ok(mut text) = query.get_single_mut() {
         text.sections[0].value = format!("Score: {}", score.0);
+    }
+}
+
+fn update_countdown_text(
+    time: Res<Time>,
+    mut countdown: ResMut<Countdown>,
+    mut query: Query<&mut Text, With<CountdownText>>,
+) {
+    if countdown.0 <= 0.0 {
+        if let Ok(mut text) = query.get_single_mut() {
+            text.sections[0].value = String::new();
+        }
+        return;
+    }
+
+    countdown.0 -= time.delta_seconds();
+    if countdown.0 < 0.0 {
+        countdown.0 = 0.0;
+    }
+
+    if let Ok(mut text) = query.get_single_mut() {
+        let value = if countdown.0 > 0.0 {
+            countdown.0.ceil() as i32
+        } else {
+            0
+        };
+
+        if value > 0 {
+            text.sections[0].value = value.to_string();
+        } else {
+            text.sections[0].value = String::new();
+        }
     }
 }
