@@ -66,6 +66,43 @@ fn main() {
 fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow>>) {
     commands.spawn(Camera2dBundle::default());
     let window = window_query.get_single().unwrap();
+
+    let bg_color = Color::hex("8ceee7").unwrap();
+    let line_color = Color::hex("fafafa").unwrap();
+
+    commands.spawn(SpriteBundle {
+        sprite: Sprite {
+            color: bg_color,
+            custom_size: Some(Vec2::new(window.width() * 2.0, window.height() * 2.0)),
+            ..default()
+        },
+        transform: Transform::from_xyz(0.0, 0.0, -1.0),
+        ..default()
+    });
+
+    let diag_length = (window.width().powi(2) + window.height().powi(2)).sqrt();
+    let diag_thickness = 50.0;
+
+    commands.spawn(SpriteBundle {
+        sprite: Sprite {
+            color: line_color,
+            custom_size: Some(Vec2::new(diag_length, diag_thickness)),
+            ..default()
+        },
+        transform: Transform::from_xyz(-150.0, 150.0, 0.0).with_rotation(bevy::math::Quat::from_rotation_z(std::f32::consts::PI / 4.0)),
+        ..default()
+    });
+
+    commands.spawn(SpriteBundle {
+        sprite: Sprite {
+            color: line_color,
+            custom_size: Some(Vec2::new(diag_length, diag_thickness)),
+            ..default()
+        },
+        transform: Transform::from_xyz(150.0, -150.0, 0.0).with_rotation(bevy::math::Quat::from_rotation_z(std::f32::consts::PI / 4.0)),
+        ..default()
+    });
+
     let wall_rects = spawn_maze(&mut commands, window);
     spawn_pickups(&mut commands, window, &wall_rects);
     spawn_score_ui(&mut commands);
@@ -88,7 +125,7 @@ fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow
 fn spawn_maze(commands: &mut Commands, window: &Window) -> Vec<(Vec2, Vec2)> {
     let half_width = window.width() / 2.0;
     let half_height = window.height() / 2.0;
-    let wall_color = Color::rgb(0.2, 0.2, 0.2);
+    let wall_color = Color::hex("1d75e1").unwrap();
 
     let walls = vec![
         // border walls
