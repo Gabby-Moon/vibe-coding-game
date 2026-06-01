@@ -26,6 +26,9 @@ struct Collectible {
     value: u32,
 }
 
+#[derive(Component)]
+struct ScoreText;
+
 #[derive(Resource)]
 struct Score(u32);
 
@@ -34,7 +37,12 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .insert_resource(Score(0))
         .add_systems(Startup, setup)
-        .add_systems(Update, (player_movement, resolve_wall_collisions.after(player_movement), collect_pickups.after(player_movement)))
+        .add_systems(Update, (
+            player_movement,
+            resolve_wall_collisions.after(player_movement),
+            collect_pickups.after(player_movement),
+            update_score_text.after(collect_pickups),
+        ))
         .run();
 }
 
@@ -43,6 +51,7 @@ fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow
     let window = window_query.get_single().unwrap();
     let wall_rects = spawn_maze(&mut commands, window);
     spawn_pickups(&mut commands, window, &wall_rects);
+    spawn_score_ui(&mut commands);
 
     commands
         .spawn(SpriteBundle {
@@ -103,6 +112,40 @@ fn spawn_maze(commands: &mut Commands, window: &Window) -> Vec<(Vec2, Vec2)> {
     }
 
     walls
+}
+
+fn spawn_score_ui(commands: &mut Commands) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Px(60.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                position_type: PositionType::Absolute,
+                top: Val::Px(0.0),
+                left: Val::Px(0.0),
+                ..default()
+            },
+            background_color: BackgroundColor(Color::rgba(0.14, 0.14, 0.14, 0.5)),
+            ..default()
+        })
+        .with_children(|parent| {
+            parent
+                .spawn(TextBundle {
+                    text: Text::from_section(
+                        "Score: 0",
+                        TextStyle {
+                            font_size: 34.0,
+                            color: Color::WHITE,
+                            ..default()
+                        },
+                    )
+                    .with_alignment(TextAlignment::Center),
+                    ..default()
+                })
+                .insert(ScoreText);
+        });
 }
 
 fn spawn_pickups(commands: &mut Commands, window: &Window, wall_rects: &[(Vec2, Vec2)]) {
@@ -289,5 +332,11 @@ fn collect_pickups(
                 info!("Score: {}", score.0);
             }
         }
+    }
+}
+
+fn update_score_text(score: Res<Score>, mut query: Query<&mut Text, With<ScoreText>>) {
+    if let Ok(mut text) = query.get_single_mut() {
+        text.sections[0].value = format!("Score: {}", score.0);
     }
 }
