@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use bevy::window::{PrimaryWindow, Window};
 
 const PLAYER_SPEED: f32 = 300.0;
+const PLAYER_SIZE: f32 = 25.0;
 
 #[derive(Component)]
 struct Player;
@@ -20,7 +22,7 @@ fn setup(mut commands: Commands) {
         .spawn(SpriteBundle {
             sprite: Sprite {
                 color: Color::rgb(0.2, 0.7, 0.9),
-                custom_size: Some(Vec2::new(50.0, 50.0)),
+                custom_size: Some(Vec2::new(PLAYER_SIZE, PLAYER_SIZE)),
                 ..default()
             },
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
@@ -32,9 +34,11 @@ fn setup(mut commands: Commands) {
 fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
     mut query: Query<&mut Transform, With<Player>>,
 ) {
     if let Ok(mut transform) = query.get_single_mut() {
+        let window = window_query.get_single().unwrap();
         let mut direction = Vec3::ZERO;
 
         if keyboard_input.pressed(KeyCode::W) || keyboard_input.pressed(KeyCode::Up) {
@@ -54,5 +58,12 @@ fn player_movement(
             direction = direction.normalize();
             transform.translation += direction * PLAYER_SPEED * time.delta_seconds();
         }
+
+        let half_size = PLAYER_SIZE / 2.0;
+        let x_bound = window.width() / 2.0 - half_size;
+        let y_bound = window.height() / 2.0 - half_size;
+
+        transform.translation.x = transform.translation.x.clamp(-x_bound, x_bound);
+        transform.translation.y = transform.translation.y.clamp(-y_bound, y_bound);
     }
 }
