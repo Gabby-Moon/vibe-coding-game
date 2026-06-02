@@ -35,6 +35,9 @@ struct TimerText;
 #[derive(Component)]
 struct CountdownText;
 
+#[derive(Component)]
+struct MenuUI;
+
 #[derive(Resource)]
 struct Score(u32);
 
@@ -44,16 +47,30 @@ struct GameTimer {
     remaining: f32,
 }
 
+#[derive(Resource, PartialEq, Eq, Clone, Copy)]
+enum GamePhase {
+    Menu,
+    Countdown,
+    Running,
+    End,
+}
+
+#[derive(Resource)]
+struct MazeWalls(Vec<(Vec2, Vec2)>);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_resource(Score(0))
         .insert_resource(GameTimer {
-            countdown: 3.0,
+            // start with menu visible; countdown begins after Space
+            countdown: 0.0,
             remaining: 60.0,
         })
+        .insert_resource(GamePhase::Menu)
         .add_systems(Startup, setup)
         .add_systems(Update, (
+            handle_space_input,
             update_timers_text,
             player_movement.after(update_timers_text),
             resolve_wall_collisions.after(player_movement),
@@ -104,9 +121,12 @@ fn setup(mut commands: Commands, window_query: Query<&Window, With<PrimaryWindow
     });
 
     let wall_rects = spawn_maze(&mut commands, window);
+    // store wall rectangles so we can respawn pickups on restart
+    commands.insert_resource(MazeWalls(wall_rects.clone()));
     spawn_pickups(&mut commands, window, &wall_rects);
     spawn_score_ui(&mut commands);
     spawn_countdown_ui(&mut commands);
+    spawn_menu_ui(&mut commands);
 
     commands
         .spawn(SpriteBundle {
@@ -269,6 +289,66 @@ fn spawn_countdown_ui(commands: &mut Commands) {
         });
 }
 
+fn spawn_menu_ui(commands: &mut Commands) {
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            background_color: BackgroundColor(Color::NONE),
+            ..default()
+        })
+        .insert(MenuUI)
+        .with_children(|parent| {
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent.spawn(TextBundle {
+                        text: Text::from_section(
+                            "Collect all the fruit on the ice in one minute",
+                            TextStyle {
+                                font_size: 28.0,
+                                color: Color::BLACK,
+                                ..default()
+                            },
+                        )
+                        .with_alignment(TextAlignment::Center),
+                        ..default()
+                    });
+
+                    parent.spawn(TextBundle {
+                        text: Text::from_section(
+                            "Press Space to start",
+                            TextStyle {
+                                font_size: 24.0,
+                                color: Color::BLACK,
+                                ..default()
+                            },
+                        )
+                        .with_alignment(TextAlignment::Center),
+                        style: Style {
+                            margin: UiRect::top(Val::Px(12.0)),
+                            ..default()
+                        },
+                        ..default()
+                    });
+                });
+        });
+}
+
 fn spawn_pickups(commands: &mut Commands, window: &Window, wall_rects: &[(Vec2, Vec2)]) {
     let mut rng = thread_rng();
     let half_width = window.width() / 2.0;
@@ -358,10 +438,10 @@ fn player_movement(
     keyboard_input: Res<Input<KeyCode>>,
     time: Res<Time>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    timer: Res<GameTimer>,
+    phase: Res<GamePhase>,
     mut query: Query<(&mut Transform, &mut Velocity), With<Player>>,
 ) {
-    if timer.countdown > 0.0 || timer.remaining <= 0.0 {
+    if *phase != GamePhase::Running {
         return;
     }
 
@@ -486,6 +566,7 @@ fn update_timers_text(
     time: Res<Time>,
     mut timer: ResMut<GameTimer>,
     score: Res<Score>,
+    mut phase: ResMut<GamePhase>,
     mut queries: ParamSet<(
         Query<&mut Text, With<CountdownText>>,
         Query<&mut Text, With<TimerText>>,
@@ -496,10 +577,16 @@ fn update_timers_text(
         if timer.countdown < 0.0 {
             timer.countdown = 0.0;
         }
+        if *phase == GamePhase::Countdown && timer.countdown == 0.0 {
+            *phase = GamePhase::Running;
+        }
     } else if timer.remaining > 0.0 {
         timer.remaining -= time.delta_seconds();
         if timer.remaining < 0.0 {
             timer.remaining = 0.0;
+        }
+        if *phase == GamePhase::Running && timer.remaining == 0.0 {
+            *phase = GamePhase::End;
         }
     }
 
@@ -517,5 +604,52 @@ fn update_timers_text(
 
     if let Ok(mut text) = queries.p1().get_single_mut() {
         text.sections[0].value = format!("Time: {}", timer.remaining.ceil() as u32);
+    }
+}
+
+fn handle_space_input(
+    keyboard: Res<Input<KeyCode>>,
+    mut phase: ResMut<GamePhase>,
+    mut timer: ResMut<GameTimer>,
+    mut commands: Commands,
+    menu_query: Query<Entity, With<MenuUI>>,
+    collectibles_query: Query<Entity, With<Collectible>>,
+    maze_walls: Option<Res<MazeWalls>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut score: ResMut<Score>,
+) {
+    if !keyboard.just_pressed(KeyCode::Space) {
+        return;
+    }
+
+    match *phase {
+        GamePhase::Menu => {
+            if let Ok(e) = menu_query.get_single() {
+                commands.entity(e).despawn_recursive();
+            }
+            timer.countdown = 3.0;
+            timer.remaining = 60.0;
+            *phase = GamePhase::Countdown;
+        }
+        GamePhase::End => {
+            // clear existing pickups
+            for e in collectibles_query.iter() {
+                commands.entity(e).despawn_recursive();
+            }
+
+            // reset score and timers
+            score.0 = 0;
+            timer.countdown = 3.0;
+            timer.remaining = 60.0;
+
+            // respawn pickups using stored walls
+            if let Some(walls) = maze_walls {
+                let window = window_query.get_single().unwrap();
+                spawn_pickups(&mut commands, window, &walls.0);
+            }
+
+            *phase = GamePhase::Countdown;
+        }
+        _ => {}
     }
 }
